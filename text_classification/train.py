@@ -4,7 +4,6 @@ sys.path.insert(0, '../tool')
 import log
 
 import os
-import logging
 import argparse
 
 import torch
@@ -19,7 +18,7 @@ from torch.utils.data.dataset import random_split
 def ArgParse():
     parser = argparse.ArgumentParser(
         description='Train a text classification model on text classification datasets.')
-    parser.add_argument('dataset', choices=text_classification.DATASETS)
+    parser.add_argument('--data-name', choices=text_classification.DATASETS)
     parser.add_argument('--num-epochs', type=int, default=5,
                         help='num epochs (default=5)')
     parser.add_argument('--embed-dim', type=int, default=32,
@@ -38,7 +37,7 @@ def ArgParse():
                         help='num of workers (default=1)')
     parser.add_argument('--device', default='cpu',
                         help='device (default=cpu)')
-    parser.add_argument('--data', default='.data',
+    parser.add_argument('--data-dir', default='.data',
                         help='data directory (default=.data)')
     parser.add_argument('--use-sp-tokenizer', type=bool, default=False,
                         help='use sentencepiece tokenizer (default=False)')
@@ -48,8 +47,6 @@ def ArgParse():
                         help='path to save vocab')
     parser.add_argument('--save-model-path',
                         help='path for saving model')
-    parser.add_argument('--logging-level', default='WARNING',
-                        help='logging level (default=WARNING)')
     args = parser.parse_args()
     return args
 
@@ -116,48 +113,44 @@ def TrainValid(num_epochs, num_workers, device, batch_size,
                     "\rProgress: {:3.0f}% lr: {:3.3f} loss: {:3.3f}".format(
                         progress * 100, scheduler.get_lr()[0], loss))
         scheduler.step()
-        print("Valid - Accuracy: {}".format(test(sub_valid_, model)))
+        print("Valid - Accuracy: {}".format(Test(batch_size, device, valid, model)))
 
-def test(batch_size, data_, model = ''):
-    data = DataLoader(data_, batch_size=batch_size, collate_fn=generate_batch)
+def Test(batch_size, device, test_data, model = ''):
+    test_data = DataLoader(test_data, batch_size=batch_size, collate_fn=generate_batch)
     total_accuracy = []
-    for text, offsets, cls in data:
-        text, offsets, cls = text.to(device), offsets.to(device), cls.to(device)
+    for feat, offsets, cls in test_data:
+        feat, offsets, cls = feat.to(device), offsets.to(device), cls.to(device)
         with torch.no_grad():
-            output = model(text, offsets)
+            output = model(feat, offsets)
             accuracy = (output.argmax(1) == cls).float().mean().item()
             total_accuracy.append(accuracy)
 
     if total_accuracy == []:
         return 0.0
-
     return sum(total_accuracy) / len(total_accuracy)
-
 
 if __name__ == "__main__":
     logger = log.GetLogger(log.logging.INFO)
     a = ArgParse()
+    logger.info("batch size:{}".format(a.batch_size))
+    logger.info("device:{}".format(a.device))
+    logger.info("data_name:{}".format(a.data_name))
+    logger.info("data_dir:{}".format(a.data_dir))
 
-    logging.basicConfig(level=getattr(logging, a.logging_level))
-
-    if not os.path.exists(a.data):
-        print("Creating directory {}".format(a.data))
+    if not os.path.exists(a.data_dir):
+        print("Creating directory {}".format(a.data_dir))
         os.mkdir(data)
 
-    logger.info(a.dataset)
-    logger.info(a.data)
-    train_data, test_data = text_classification.DATASETS[a.dataset](root=a.data, ngrams=a.ngrams)
-    model = TextSentiment(len(train_data.get_vocab()),
-                              a.embed_dim, len(train_data.get_labels())).to(a.device)
+    train, test = text_classification.DATASETS[a.data_name](root=a.data_dir, ngrams=a.ngrams)
+    model = TextSentiment(len(train.get_vocab()), a.embed_dim, len(train.get_labels())).to(a.device)
 
-    train_len = int(len(train_data) * a.split_ratio)
-    train, valid = random_split(train_data, [train_len, len(train_data) - train_len])
+    train_len = int(len(train) * a.split_ratio)
+    train2, valid = random_split(train, [train_len, len(train) - train_len])
 
-
-    TrainValid(a.num_epochs, a.num_worders, a.device, a.batch_size, a.lr, a.lr_gamma,
-               train, valid, model = model)
-    acc = test(test_data, model)
-    print("Test - Accuracy: {}".format(acc))
+    TrainValid(a.num_epochs, a.num_workers, a.device, a.batch_size, a.lr, a.lr_gamma,
+               train2, valid, model = model)
+    acc = Test(a.batch_size, a.device, test, model)
+    logger.info("Test - Accuracy: {}".format(acc))
 
     if a.save_model_path:
         logger.info(a.save_model_path)
@@ -165,4 +158,6 @@ if __name__ == "__main__":
 
     if a.dictionary is not None:
         print("Save vocab to {}".format(a.dictionary))
-        torch.save(train_dataset.get_vocab(), a.dictionary)
+        print(train)
+        print(train2)
+        torch.save(train.get_vocab(), a.dictionary)
