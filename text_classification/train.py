@@ -96,7 +96,7 @@ def TrainValid(num_epochs, num_workers, device, batch_size,
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=lr_gamma)
     train_data = DataLoader(train, batch_size=batch_size, shuffle=True,
                             collate_fn=generate_batch, num_workers=num_workers)
-    num_lines = num_epochs * len(train)
+    num_lines = num_epochs * len(train_data)
     loss_fun = torch.nn.CrossEntropyLoss().to(device)
     for epoch in range(num_epochs):
         for i, (text, offsets, cls) in enumerate(train_data):
